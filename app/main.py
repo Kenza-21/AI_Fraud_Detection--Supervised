@@ -1,3 +1,4 @@
+# main.py
 import streamlit as st
 import pandas as pd
 
@@ -337,32 +338,54 @@ def display_temporal_analysis():
 
     st.plotly_chart(fig, use_container_width=True)
     
-
 def display_transaction_details(df):
     """
     Affiche les détails des transactions avec filtres et un expander pour le XML.
+    Affiche maintenant TOUTES les transactions (normales et anormales)
     """
     st.markdown('<h2 class="section-title">Détail des Transactions</h2>', unsafe_allow_html=True)
 
+    # Générer un identifiant unique pour cette session d'affichage
+    session_id = str(hash(str(datetime.now())))
+    
     # Conteneur de filtres moderne
     with st.container(border=True):
-        col1, col2, col3 = st.columns(3)
+        col1, col2, col3, col4 = st.columns(4)
         with col1:
-            show_anomalies = st.checkbox("Afficher uniquement les transactions à risque", value=True)
+            show_all = st.checkbox(
+                "Afficher toutes les transactions",
+                value=True,
+                key=f"show_all_transactions_{session_id}"
+            )
         with col2:
-            min_amount = st.number_input("Montant minimum (MAD)",
-                                       min_value=0,
-                                       max_value=int(df['intrbk_sttlm_amt'].max()),
-                                       value=0)
+            show_anomalies = st.checkbox(
+                "Afficher uniquement les transactions à risque",
+                value=False,
+                key=f"show_only_anomalies_{session_id}"
+            )
         with col3:
-            risk_level = st.selectbox("Niveau de risque",
-                                    ["Tous", "Faible (0-30%)", "Moyen (30-60%)", "Élevé (60-100%)"])
+            min_amount = st.number_input(
+                "Montant minimum (MAD)",
+                min_value=0,
+                max_value=int(df['intrbk_sttlm_amt'].max()) if not df.empty else 1000000,
+                value=0,
+                key=f"min_amount_filter_{session_id}"
+            )
+        with col4:
+            risk_level = st.selectbox(
+                "Niveau de risque",
+                ["Tous", "Faible (0-30%)", "Moyen (30-60%)", "Élevé (60-100%)"],
+                key=f"risk_level_filter_{session_id}"
+            )
 
     # Application des filtres
     filtered_df = df.copy()
 
     if show_anomalies:
-        filtered_df = filtered_df[filtered_df['combined_score'] > 0.3]
+        filtered_df = filtered_df[filtered_df['is_anomaly'] == 1]
+    elif not show_all:
+        # Par défaut, montrer seulement les anomalies si on ne veut pas tout voir
+        filtered_df = filtered_df[filtered_df['is_anomaly'] == 1]
 
     filtered_df = filtered_df[filtered_df['intrbk_sttlm_amt'] >= min_amount]
 
@@ -379,30 +402,47 @@ def display_transaction_details(df):
         st.info("Aucune transaction ne correspond aux critères sélectionnés.")
         return
 
+    # Afficher le nombre de transactions filtrées
+    st.info(f"**{len(filtered_df)}** transaction(s) correspondant aux filtres "
+            f"({len(filtered_df[filtered_df['is_anomaly'] == 1])} anomalie(s))")
+
     for idx, row in filtered_df.iterrows():
         # Définition du statut et de la classe CSS basée sur le score combiné
-        if row['combined_score'] >= 0.6:
-            card_class = "risk-card high-risk"
-            status = "Transaction à haut risque"
-            icon = "🚨"
-        elif row['combined_score'] >= 0.3:
-            card_class = "risk-card suspicious"
-            status = "Transaction suspecte"
-            icon = "⚠️"
+        if row['is_anomaly'] == 1:
+            if row['combined_score'] >= 0.6:
+                
+                card_class = "risk-card high-risk"
+                status = "Transaction à haut risque"
+                icon = "🚨"
+            elif row['combined_score'] >= 0.3:
+                card_class = "risk-card medium-risk"
+                status = "Transaction à risque moyen"
+                icon = "⚠️"
+            else:
+                card_class = "risk-card low-risk"
+                status = "Transaction suspecte"
+                status = "Risque faible"
+                icon = "🔶"
         else:
-            card_class = "risk-card normal"
-            status = "Transaction normale"
+            
+            if row['combined_score'] == 0.0:
+                card_class = "risk-card normal-zero"
+                status = "Transaction normale"
+                icon = "✅"
+            else:
+                card_class = "risk-card normal"
+                status = "Transaction normale"
             icon = "✅"
-        
+
         # Formatage des informations
         debtor_info = f"{row['debtor_name']} ({row['debtor_country']})"
         creditor_info = f"{row['creditor_name']} ({row['creditor_country']})"
         amount = f"{row['intrbk_sttlm_amt']:,.2f} MAD"
-        date = pd.to_datetime(row['transaction_date']).strftime("%d/%m/%Y %H:%M")
-        
+        date = pd.to_datetime(row['transaction_date']).strftime("%d/%m/%Y %H:%M") if 'transaction_date' in row else "N/A"
+
         # Affichage du message d'explication
         reasons_text = row.get('anomaly_reasons', 'Aucune raison spécifique.')
-        
+
         st.markdown(f"""
         <div class="{card_class}">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
@@ -431,26 +471,134 @@ def display_transaction_details(df):
 
         col_buttons = st.columns(2)
         with col_buttons[0]:
-            if st.button(f"Sauvegarder", key=f"save_{row['transaction_id']}", use_container_width=True):
+            if st.button(f"Sauvegarder", key=f"save_{row['transaction_id']}_{idx}_{session_id}", use_container_width=True):
                 with st.spinner("Sauvegarde en cours..."):
                     single_row_df = pd.DataFrame([row.to_dict()])
-                    success = db_manager.save_transactions(single_row_df, row['file_name'])
+                    
+                    # Correction ici: passer le contenu XML, pas le nom du fichier
+                    file_index = row.get('file_index', 0)
+                    if st.session_state.all_xml_contents and file_index < len(st.session_state.all_xml_contents):
+                        xml_content_to_save = st.session_state.all_xml_contents[file_index]
+                        success = db_manager.save_transactions(single_row_df, xml_content_to_save)
+                    else:
+                        st.error("Contenu XML introuvable pour ce fichier.")
+                        success = False
+
                     if success:
                         st.success("Transaction sauvegardée avec succès")
                     else:
                         st.error("Erreur lors de la sauvegarde")
-        
+
         with col_buttons[1]:
             # Utilisation d'un expander pour un affichage propre du XML
             with st.expander("Voir XML", expanded=False):
-                file_index = row['file_index']
+                file_index = row.get('file_index', 0)
                 if st.session_state.all_xml_contents and file_index < len(st.session_state.all_xml_contents):
                     st.code(st.session_state.all_xml_contents[file_index], language='xml')
                 else:
                     st.error("Contenu XML introuvable pour ce fichier.")
-        
+
         st.markdown("---")
 
+
+def display_anomalies_only(df):
+    """
+    Affiche uniquement les transactions anormales de manière claire
+    """
+    st.markdown('<h2 class="section-title">Transactions Anormales</h2>', unsafe_allow_html=True)
+    
+    # Filtrer seulement les anomalies
+    anomalies_df = df[df['is_anomaly'] == 1].copy()
+    
+    if anomalies_df.empty:
+        st.success("Aucune transaction anormale détectée !")
+        return
+    
+    st.info(f"**{len(anomalies_df)}** transaction(s) anormale(s) détectée(s)")
+    
+    # Trier par score de risque décroissant
+    anomalies_df = anomalies_df.sort_values('combined_score', ascending=False)
+    
+    # Statistiques des anomalies
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("Transactions à haut risque", 
+                 len(anomalies_df[anomalies_df['combined_score'] >= 0.6]))
+                 
+    with col2:
+        st.metric("Transactions suspectes", 
+                 len(anomalies_df[anomalies_df['combined_score'] < 0.6]))
+               
+    with col3:
+        total_amount = anomalies_df['intrbk_sttlm_amt'].sum()
+        st.metric("Montant total à risque", f"{total_amount:,.0f} MAD")
+               
+    
+    st.markdown("---")
+    
+    # Afficher chaque anomalie
+    for idx, row in anomalies_df.iterrows():
+        if row['combined_score'] >= 0.6:
+            card_class = "risk-card high-risk"
+            status = "🚨 HAUT RISQUE"
+        else:
+            card_class = "risk-card suspicious"
+            status = "⚠️ SUSPECTE"
+        
+        debtor_info = f"{row['debtor_name']} ({row['debtor_country']})"
+        creditor_info = f"{row['creditor_name']} ({row['creditor_country']})"
+        amount = f"{row['intrbk_sttlm_amt']:,.2f} MAD"
+        date = pd.to_datetime(row['transaction_date']).strftime("%d/%m/%Y %H:%M") if 'transaction_date' in row else "N/A"
+        
+        st.markdown(f"""
+        <div class="{card_class}">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                <h3 style="margin: 0; font-size: 1.125rem; font-weight: 600;">Transaction #{row['transaction_id']}</h3>
+                <span style="font-weight: 700; font-size: 0.875rem; color: #fff;">{status}</span>
+            </div>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 1rem;">
+                <div>
+                    <p style="margin: 0.25rem 0;"><strong>Débiteur:</strong> {debtor_info}</p>
+                    <p style="margin: 0.25rem 0;"><strong>Créancier:</strong> {creditor_info}</p>
+                </div>
+                <div>
+                    <p style="margin: 0.25rem 0;"><strong>Montant:</strong> {amount}</p>
+                    <p style="margin: 0.25rem 0;"><strong>Date:</strong> {date}</p>
+                </div>
+                <div>
+                    <p style="margin: 0.25rem 0;"><strong>Score de risque:</strong> {row['combined_score']*100:.1f}%</p>
+                    <p style="margin: 0.25rem 0;"><strong>Raisons:</strong> {row.get('anomaly_reasons', 'Non spécifié')}</p>
+                </div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        # Actions pour cette anomalie
+        col_act1, col_act2 = st.columns(2)
+        with col_act1:
+            if st.button(" Voir détails", key=f"details_{row['transaction_id']}_{idx}", use_container_width=True):
+                st.write(f"**Détails de la transaction {row['transaction_id']}:**")
+                st.json({k: v for k, v in row.items() if pd.notna(v)})
+        with col_act2:
+            if st.button(" Sauvegarder", key=f"save_anom_{row['transaction_id']}_{idx}", use_container_width=True):
+                with st.spinner("Sauvegarde..."):
+                    single_row_df = pd.DataFrame([row.to_dict()])
+                    
+                    # Correction ici: passer le contenu XML
+                    file_index = row.get('file_index', 0)
+                    if st.session_state.all_xml_contents and file_index < len(st.session_state.all_xml_contents):
+                        xml_content_to_save = st.session_state.all_xml_contents[file_index]
+                        success = db_manager.save_transactions(single_row_df, xml_content_to_save)
+                    else:
+                        st.error("Contenu XML source introuvable pour cette transaction.")
+                        success = False
+
+                    if success:
+                        st.success(" Transaction sauvegardée")
+                    else:
+                        st.error(" Erreur de sauvegarde")
+        
+        st.markdown("---")
 
 def process_uploaded_file(uploaded_file, file_index=None):
     """Traite le fichier XML uploadé avec gestion robuste des index"""
@@ -547,7 +695,7 @@ with st.sidebar:
     st.markdown("---")
     
     # point de navigation
-    pages = ["Upload XML", "Tableau de Bord", "Transactions", "Rapports", "Profil"]
+    pages = ["Upload XML", "Tableau de Bord", "Transactions", "Anomalies","Rapports", "Profil"]
     if user.get('role') == 'admin':
         pages.append("Admin Dashboard")
         pages.append("Personnalisation") 
@@ -580,8 +728,12 @@ with st.sidebar:
 
     
 
-    
-    
+
+if st.session_state.selected_page == "Anomalies":
+      if st.session_state.df_combined is not None:
+        display_anomalies_only(st.session_state.df_combined)
+
+        
 if st.session_state.selected_page == "Admin Dashboard":
        show_admin_dashboard()  
     

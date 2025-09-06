@@ -107,7 +107,7 @@ def show_customization_tab():
                 "AI_SCORE_THRESHOLD": new_ai_threshold,
             }
             save_rules(new_rules)
-            st.success("✅ Les nouvelles règles ont été sauvegardées. L'analyse des prochains fichiers utilisera ces paramètres.")
+            st.success("Les nouvelles règles ont été sauvegardées. L'analyse des prochains fichiers utilisera ces paramètres.")
             # Clear cache to ensure new rules are used
             st.cache_data.clear()
 
@@ -117,14 +117,40 @@ def get_custom_rules():
     return rules
 
 # Augmentez les seuils pour réduire les faux positifs
+# customization.py - Modifications à apporter
+
 def apply_custom_rules(df, rules_config):
+    """Applique les règles personnalisées sur le DataFrame avec XGBoost"""
+    
+    # Initialiser la colonne d'anomalie basée sur les règles
     df['rule_based_anomaly'] = 0
+    
+    # Récupérer les configurations
     blacklist_countries = rules_config.get('BLACKLIST_COUNTRIES', [])
+    rule_threshold = rules_config.get('RULE_BASED_SCORE_THRESHOLD', 1.5)
+    ai_threshold = rules_config.get('AI_SCORE_THRESHOLD', 0.4)
     
-    # 🔼 AUGMENTER les seuils
-    df.loc[df['intrbk_sttlm_amt'] > 1000000, 'rule_based_anomaly'] = 1  # 1M au lieu de 500K
+    # 🔼 Appliquer les règles avec les nouveaux seuils
+    # 1. Pays blacklistés
     df.loc[df['creditor_country'].isin(blacklist_countries), 'rule_based_anomaly'] = 1
-    df.loc[(df['is_international'] == 1) & (df['intrbk_sttlm_amt'] > 250000), 'rule_based_anomaly'] = 1  # 250K au lieu de 100K
+    df.loc[df['debtor_country'].isin(blacklist_countries), 'rule_based_anomaly'] = 1
     
-    df['final_anomaly'] = ((df['is_anomaly'] == 1) | (df['rule_based_anomaly'] == 1)).astype(int)
+    # 2. Montants très élevés (1M MAD au lieu de 500K)
+    df.loc[df['intrbk_sttlm_amt'] > 1000000, 'rule_based_anomaly'] = 1
+    
+    # 3. Transactions internationales avec montant élevé (250K au lieu de 100K)
+    if 'is_international' in df.columns:
+        df.loc[(df['is_international'] == 1) & (df['intrbk_sttlm_amt'] > 250000), 'rule_based_anomaly'] = 1
+    
+    # 4. Utiliser les scores combinés de XGBoost + règles métier
+    # Vérifier si les colonnes de score existent
+    if 'combined_score' in df.columns:
+        df['final_anomaly'] = (
+            (df['combined_score'] > ai_threshold) | 
+            (df['rule_based_anomaly'] == 1)
+        ).astype(int)
+    else:
+        # Fallback si les scores XGBoost ne sont pas disponibles
+        df['final_anomaly'] = df['rule_based_anomaly']
+    
     return df
