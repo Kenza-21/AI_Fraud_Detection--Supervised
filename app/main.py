@@ -1,4 +1,3 @@
-# main.py
 import streamlit as st
 import pandas as pd
 
@@ -15,7 +14,7 @@ from email_sender import send_email_with_report
 from customization import show_customization_tab
 from auth import check_authentication, show_login_register, logout
 from profile import show_auth_card, get_avatar_initials,get_avatar_color,show_user_profile_menu, show_profile_tab, show_edit_profile
-
+#from profile import logout_User
 from admin_dashboard import show_admin_dashboard
 
 
@@ -345,9 +344,6 @@ def display_transaction_details(df):
     """
     st.markdown('<h2 class="section-title">Détail des Transactions</h2>', unsafe_allow_html=True)
 
-    # Générer un identifiant unique pour cette session d'affichage
-    session_id = str(hash(str(datetime.now())))
-    
     # Conteneur de filtres moderne
     with st.container(border=True):
         col1, col2, col3, col4 = st.columns(4)
@@ -355,13 +351,13 @@ def display_transaction_details(df):
             show_all = st.checkbox(
                 "Afficher toutes les transactions",
                 value=True,
-                key=f"show_all_transactions_{session_id}"
+                key="show_all_transactions"
             )
         with col2:
             show_anomalies = st.checkbox(
                 "Afficher uniquement les transactions à risque",
                 value=False,
-                key=f"show_only_anomalies_{session_id}"
+                key="show_only_anomalies"
             )
         with col3:
             min_amount = st.number_input(
@@ -369,28 +365,35 @@ def display_transaction_details(df):
                 min_value=0,
                 max_value=int(df['intrbk_sttlm_amt'].max()) if not df.empty else 1000000,
                 value=0,
-                key=f"min_amount_filter_{session_id}"
+                key="min_amount_filter"
             )
         with col4:
             risk_level = st.selectbox(
                 "Niveau de risque",
                 ["Tous", "Faible (0-30%)", "Moyen (30-60%)", "Élevé (60-100%)"],
-                key=f"risk_level_filter_{session_id}"
+                key="risk_level_filter"
             )
 
     # Application des filtres
     filtered_df = df.copy()
 
+    # Logique de filtrage corrigée
     if show_anomalies:
         filtered_df = filtered_df[filtered_df['is_anomaly'] == 1]
     elif not show_all:
-        # Par défaut, montrer seulement les anomalies si on ne veut pas tout voir
-        filtered_df = filtered_df[filtered_df['is_anomaly'] == 1]
+        # Si on ne veut pas tout voir ET on ne veut pas seulement les anomalies,
+        # alors on montre rien? Ou on garde le comportement par défaut?
+        # Je suggère de montrer toutes les transactions si show_all est False mais show_anomalies aussi False
+        pass  # On garde toutes les transactions
 
     filtered_df = filtered_df[filtered_df['intrbk_sttlm_amt'] >= min_amount]
 
     if risk_level != "Tous":
-        risk_map = {"Faible (0-30%)": (0, 0.3), "Moyen (30-60%)": (0.3, 0.6), "Élevé (60-100%)": (0.6, 1)}
+        risk_map = {
+            "Faible (0-30%)": (0, 0.3), 
+            "Moyen (30-60%)": (0.3, 0.6), 
+            "Élevé (60-100%)": (0.6, 1)
+        }
         min_score, max_score = risk_map[risk_level]
         filtered_df = filtered_df[
             (filtered_df['combined_score'] >= min_score) &
@@ -410,7 +413,6 @@ def display_transaction_details(df):
         # Définition du statut et de la classe CSS basée sur le score combiné
         if row['is_anomaly'] == 1:
             if row['combined_score'] >= 0.6:
-                
                 card_class = "risk-card high-risk"
                 status = "Transaction à haut risque"
                 icon = "🚨"
@@ -420,11 +422,9 @@ def display_transaction_details(df):
                 icon = "⚠️"
             else:
                 card_class = "risk-card low-risk"
-                status = "Transaction suspecte"
                 status = "Risque faible"
                 icon = "🔶"
         else:
-            
             if row['combined_score'] == 0.0:
                 card_class = "risk-card normal-zero"
                 status = "Transaction normale"
@@ -432,7 +432,7 @@ def display_transaction_details(df):
             else:
                 card_class = "risk-card normal"
                 status = "Transaction normale"
-            icon = "✅"
+                icon = "✅"
 
         # Formatage des informations
         debtor_info = f"{row['debtor_name']} ({row['debtor_country']})"
@@ -471,7 +471,7 @@ def display_transaction_details(df):
 
         col_buttons = st.columns(2)
         with col_buttons[0]:
-            if st.button(f"Sauvegarder", key=f"save_{row['transaction_id']}_{idx}_{session_id}", use_container_width=True):
+            if st.button(f"Sauvegarder", key=f"save_{row['transaction_id']}_{idx}", use_container_width=True):
                 with st.spinner("Sauvegarde en cours..."):
                     single_row_df = pd.DataFrame([row.to_dict()])
                     
@@ -499,7 +499,6 @@ def display_transaction_details(df):
                     st.error("Contenu XML introuvable pour ce fichier.")
 
         st.markdown("---")
-
 
 def display_anomalies_only(df):
     """
@@ -890,11 +889,14 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
+
+
 st.markdown("---")  
 with st.sidebar:
         st.markdown("---")  
         if st.button(" Déconnexion", key="logout_button", use_container_width=True):
               logout()
+               
               st.rerun()  
               st.markdown("---")      
 # --- Contenu de la barre latérale ---

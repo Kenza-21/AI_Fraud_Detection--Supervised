@@ -12,7 +12,7 @@ def send_email_with_report(to_email, report_path, subject, body):
     smtp_server = os.getenv("SMTP_SERVER")
     smtp_port = int(os.getenv("SMTP_PORT"))
     sender_email = os.getenv("SENDER_EMAIL")
-    password = os.getenv("EMAIL_PASSWORD")
+    password = os.getenv("PASSWORD")
 
 
     # Création du message

@@ -485,3 +485,19 @@ def show_edit_profile():
                     st.rerun()
                 else:
                     st.error(message)
+
+
+def logout():
+    """Déconnecte l'utilisateur et réinitialise complètement la session"""
+    # Efface toute la session state SAUF les clés nécessaires pour la redirection
+    keys_to_keep = ['_streamlit', 'FormSubmitter:logout_button', 'file_uploader']
+    
+    for key in list(st.session_state.keys()):
+        if key not in keys_to_keep:
+            del st.session_state[key]
+    
+    # Réinitialise l'état d'authentification
+    st.session_state.authenticated = False
+    
+    # Force le rerun pour afficher la page de login
+    st.rerun()

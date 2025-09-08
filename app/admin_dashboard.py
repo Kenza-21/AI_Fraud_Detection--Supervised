@@ -191,6 +191,7 @@ def show_admin_dashboard():
                success, message = admin_db.delete_user(user_id)
                if success:
                    st.success(message)
+                   st.rerun()
                else:
                    st.error(message)
                    st.rerun()
