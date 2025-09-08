@@ -8,3 +8,4 @@ sqlalchemy==1.4.44
 joblib==1.2.0
 python-dotenv==0.21.0
 plotly==5.11.0
+rich==14.1.0
